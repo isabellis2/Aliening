@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meu Jogo Estilo Galaga</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #111;
+            color: white;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        canvas {
+            border: 4px solid #fff;
+            background-color: #180840;
+            box-shadow: 0 0 20px rgba(247, 104, 247, 0.3);
+        }
+
+        #instrucoes {
+            margin-top: 10px;
+            color: #aaa;
+            font-size: 14px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <canvas id="gameCanvas" width="600" height="700"></canvas>
+    <div id="instrucoes">Use as Setas (← →) para mover | Espaço para atirar</div>
+
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+
+        // ==========================================
+        // CONFIGURAÇÃO DOS SEUS ARQUIVOS
+        // ==========================================
+        const ARQUIVO_FUNDO = "cenario.png";
+        const ARQUIVO_NAVE = "nave.png";
+        const ARQUIVO_INIMIGO = "inimigo.png";
+        const ARQUIVO_SOM = "musica.mp3";
+
+        let imgFundo = new Image(); imgFundo.src = ARQUIVO_FUNDO;
+        let imgNave = new Image(); imgNave.src = ARQUIVO_NAVE;
+        let imgInimigo = new Image(); imgInimigo.src = ARQUIVO_INIMIGO;
+
+        let fundoCarregado = false; imgFundo.onload = () => fundoCarregado = true;
+        let naveCarregada = false; imgNave.onload = () => naveCarregada = true;
+        let inimigoCarregado = false; imgInimigo.onload = () => inimigoCarregado = true;
+
+        let somFundo = new Audio(ARQUIVO_SOM);
+        somFundo.loop = true;
+        let somIniciado = false;
+
+        // ==========================================
+        // CONFIGURAÇÃO DO CENÁRIO (GOTAS EM DIAGONAL)
+        // ==========================================
+        const gotas = [];
+        const QTD_GOTAS = 35;
+        for (let i = 0; i < QTD_GOTAS; i++) {
+            gotas.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                comprimento: Math.random() * 15 + 10,
+                velocidade: Math.random() * 4 + 2,
+                alfa: Math.random()
+            });
+        }
+
+        // ==========================================
+        // VARIÁVEIS DO JOGO E FORMAÇÃO
+        // ==========================================
+        const nave = {
+            x: canvas.width / 2 - 25,
+            y: canvas.height - 110,
+            largura: 100,
+            altura: 100,
+            velocidade: 7
+        };
+
+        let tiros = [];
+        let inimigos = [];
+        let pontos = 0;
+        let fase = 1;
+        let gameOver = false;
+        let teclas = {};
+
+        // Parâmetros da Formação Galaga
+        const LINHAS = 3;
+        const COLUNAS = 8;
+        const ESPACAMENTO_X = 55;
+        const ESPACAMENTO_Y = 45;
+        let balancoFormacao = 0;
+        let direcaoBalanco = 0.4;
+
+        function criarFormacao() {
+            inimigos = [];
+            const inicioX = (canvas.width - (COLUNAS * ESPACAMENTO_X)) / 2;
+            const inicioY = 80;
+
+            for (let l = 0; l < LINHAS; l++) {
+                for (let c = 0; c < COLUNAS; c++) {
+                    inimigos.push({
+                        homeX: inicioX + c * ESPACAMENTO_X, // Posição ideal na grade
+                        homeY: inicioY + l * ESPACAMENTO_Y,
+                        x: inicioX + c * ESPACAMENTO_X,
+                        y: -50, // Começam surgindo de fora da tela
+                        largura: 40,
+                        altura: 40,
+                        estado: "ENTRANDO", // Estados: ENTRANDO, FORMACAO, ATAQUE, RETORNANDO
+                        anguloAtaque: 0,
+                        velocidadeAtaque: 3 + (fase * 0.3)
+                    });
+                }
+            }
+        }
+
+        // Inicializa a primeira leva de inimigos
+        criarFormacao();
+
+        // Controles por teclado
+        window.addEventListener("keydown", (e) => {
+            teclas[e.code] = true;
+            if (!somIniciado) {
+                somFundo.play().catch(() => { });
+                somIniciado = true;
+            }
+            if (e.code === "Space" && !gameOver) atirar();
+            if (e.code === "KeyR" && gameOver) reiniciarJogo();
+        });
+        window.addEventListener("keyup", (e) => teclas[e.code] = false);
+
+        function atirar() {
+            tiros.push({
+                x: nave.x + nave.largura / 2 - 3,
+                y: nave.y,
+                largura: 6,
+                altura: 15,
+                velocidade: 8
+            });
+        }
+
+        function reiniciarJogo() {
+            tiros = [];
+            pontos = 0;
+            fase = 1;
+            gameOver = false;
+            nave.x = canvas.width / 2 - 25;
+            criarFormacao();
+        }
+
+        // ==========================================
+        // LOOP PRINCIPAL (ATUALIZAÇÃO DA LÓGICA)
+        // ==========================================
+        function atualizar() {
+            if (gameOver) return;
+
+            // 1. Mover Gotas Neon
+            gotas.forEach(gota => {
+                gota.y += gota.velocidade;
+                gota.x += gota.velocidade * 0.3;
+                if (Math.random() < 0.08) gota.alfa = Math.random() * 0.7 + 0.3;
+                if (gota.y > canvas.height || gota.x > canvas.width) {
+                    gota.y = -20;
+                    gota.x = Math.random() * canvas.width - 150;
+                }
+            });
+
+            // 2. Mover Nave
+            if (teclas["ArrowLeft"] && nave.x > 0) nave.x -= nave.velocidade;
+            if (teclas["ArrowRight"] && nave.x < canvas.width - nave.largura) nave.x += nave.velocidade;
+
+            // 3. Mover Tiros
+            tiros.forEach((tiro, tIndex) => {
+                tiro.y -= tiro.velocidade;
+                if (tiro.y < 0) tiros.splice(tIndex, 1);
+            });
+
+            // 4. Balanço da Formação (Movimento "respiratório" do grupo)
+            balancoFormacao += direcaoBalanco;
+            if (Math.abs(balancoFormacao) > 35) direcaoBalanco *= -1;
+
+            // 5. Chance Aleatória de um Inimigo Iniciar um Ataque Rasante
+            if (Math.random() < 0.015) {
+                let aptos = inimigos.filter(i => i.estado === "FORMACAO");
+                if (aptos.length > 0) {
+                    let sorteado = aptos[Math.floor(Math.random() * aptos.length)];
+                    sorteado.estado = "ATAQUE";
+                    sorteado.anguloAtaque = 0;
+                }
+            }
+
+            // 6. Atualizar Inteligência dos Inimigos
+            inimigos.forEach((inimigo, iIndex) => {
+                let alvoX = inimigo.homeX + balancoFormacao; // Posição atualizada com o balanço
+
+                if (inimigo.estado === "ENTRANDO") {
+                    inimigo.y += 2;
+                    inimigo.x += (alvoX - inimigo.x) * 0.1;
+                    if (Math.abs(inimigo.y - inimigo.homeY) < 5) {
+                        inimigo.estado = "FORMACAO";
+                    }
+                }
+                else if (inimigo.estado === "FORMACAO") {
+                    inimigo.x = alvoX;
+                    inimigo.y = inimigo.homeY;
+                }
+                else if (inimigo.estado === "ATAQUE") {
+                    inimigo.y += inimigo.velocidadeAtaque;
+                    inimigo.anguloAtaque += 0.07;
+                    // Seno cria a curva elegante em "S" (zigue-zague) na descida
+                    inimigo.x += Math.sin(inimigo.anguloAtaque) * 4;
+
+                    // Passou por baixo? Surge no topo e muda para o modo de retorno
+                    if (inimigo.y > canvas.height) {
+                        inimigo.y = -40;
+                        inimigo.estado = "RETORNANDO";
+                    }
+                }
+                else if (inimigo.estado === "RETORNANDO") {
+                    // Voa de volta calculando a distância até o seu slot na formação
+                    let dx = alvoX - inimigo.x;
+                    let dy = inimigo.homeY - inimigo.y;
+                    let dist = Math.sqrt(dx * dx + dy * dy);
+
+                    if (dist < 6) {
+                        inimigo.estado = "FORMACAO";
+                    } else {
+                        inimigo.x += (dx / dist) * 4;
+                        inimigo.y += (dy / dist) * 4;
+                    }
+                }
+
+                // Colisão do Inimigo com a Nave
+                if (verificarColisao(nave, inimigo)) {
+                    gameOver = true;
+                }
+
+                // Colisão do Tiro com Inimigo
+                tiros.forEach((tiro, tIndex) => {
+                    if (verificarColisao(tiro, inimigo)) {
+                        inimigos.splice(iIndex, 1);
+                        tiros.splice(tIndex, 1);
+                        pontos += 10;
+                    }
+                });
+            });
+
+            // Se destruir todos os inimigos, avança de fase e cria nova formação!
+            if (inimigos.length === 0 && !gameOver) {
+                fase++;
+                criarFormacao();
+            }
+        }
+
+        function verificarColisao(rect1, rect2) {
+            return rect1.x < rect2.x + rect2.largura &&
+                rect1.x + rect1.largura > rect2.x &&
+                rect1.y < rect2.y + rect2.altura &&
+                rect1.y + rect1.altura > rect2.y;
+        }
+
+        // ==========================================
+        // RENDERIZAÇÃO (DESENHO DOS ELEMENTOS)
+        // ==========================================
+        function desenhar() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Fundo Violeta ou Imagem de Cenário
+            if (fundoCarregado) {
+                ctx.drawImage(imgFundo, 0, 0, canvas.width, canvas.height);
+            } else {
+                ctx.fillStyle = "#180840";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            // Desenhar Chuva/Gotas Neon Piscantes
+            gotas.forEach(gota => {
+                ctx.save();
+                ctx.globalAlpha = gota.alfa;
+                ctx.lineCap = "round";
+
+                // Lateral clara (#ffccff) - Linha mais grossa por baixo
+                ctx.strokeStyle = "#ffccff";
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(gota.x, gota.y);
+                ctx.lineTo(gota.x + (gota.comprimento * 0.3), gota.y + gota.comprimento);
+                ctx.stroke();
+
+                // Centro principal (#f768f7) - Linha fina por cima
+                ctx.strokeStyle = "#f768f7";
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(gota.x, gota.y);
+                ctx.lineTo(gota.x + (gota.comprimento * 0.3), gota.y + gota.comprimento);
+                ctx.stroke();
+
+                ctx.restore();
+            });
+
+            // Desenhar Nave
+            if (naveCarregada) {
+                ctx.drawImage(imgNave, nave.x, nave.y, nave.largura, nave.altura);
+            } else {
+                ctx.fillStyle = "#00ffcc";
+                ctx.fillRect(nave.x, nave.y, nave.largura, nave.altura);
+            }
+
+            // Desenhar Tiros
+            ctx.fillStyle = "#ff3333";
+            tiros.forEach(tiro => ctx.fillRect(tiro.x, tiro.y, tiro.largura, tiro.altura));
+
+            // Desenhar Inimigos
+            inimigos.forEach(inimigo => {
+                if (inimigoCarregado) {
+                    ctx.drawImage(imgInimigo, inimigo.x, inimigo.y, inimigo.largura, inimigo.altura);
+                } else {
+                    ctx.fillStyle = "#ffcc00";
+                    ctx.fillRect(inimigo.x, inimigo.y, inimigo.largura, inimigo.altura);
+                }
+            });
+
+            // Interface Textual
+            ctx.fillStyle = "#fff";
+            ctx.font = "20px sans-serif";
+            ctx.fillText(`Pontos: ${pontos}`, 20, 40);
+            ctx.fillText(`Fase: ${fase}`, canvas.width - 100, 40);
+
+            // Tela de Game Over
+            if (gameOver) {
+                ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = "#ff3333";
+                ctx.font = "40px sans-serif";
+                ctx.textAlign = "center";
+                ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 2 - 20);
+                ctx.fillStyle = "#fff";
+                ctx.font = "20px sans-serif";
+                ctx.fillText("Pressione R para Recomeçar", canvas.width / 2, canvas.height / 2 + 30);
+                ctx.textAlign = "start";
+            }
+        }
+
+        function loop() {
+            atualizar();
+            desenhar();
+            requestAnimationFrame(loop);
+        }
+
+        loop();
+    </script>
+</body>
+
+</html>
